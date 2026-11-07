@@ -1,0 +1,62 @@
+diff --git a/modules/tracktion_engine/audio_files/tracktion_AudioFile.cpp b/modules/tracktion_engine/audio_files/tracktion_AudioFile.cpp
+index 75b1dc34..5004c9eb 100644
+--- a/modules/tracktion_engine/audio_files/tracktion_AudioFile.cpp
++++ b/modules/tracktion_engine/audio_files/tracktion_AudioFile.cpp
+@@ -381,7 +381,9 @@ AudioFileInfo::AudioFileInfo (const AudioFile& file, juce::AudioFormatReader* re
+         isFloatingPoint = reader->usesFloatingPointData;
+         needsCachedProxy = dynamic_cast<juce::WavAudioFormat*> (format) == nullptr
+                               && dynamic_cast<juce::AiffAudioFormat*> (format) == nullptr
+-                              && dynamic_cast<FloatAudioFormat*> (format) == nullptr;
++                              && dynamic_cast<FloatAudioFormat*> (format) == nullptr
++                              && ! (file.engine->getAudioFileManager().isReadDirectly                       // Mixtopia patch
++                                     && file.engine->getAudioFileManager().isReadDirectly (file.getFile()));
+         channelLayout   = reader->getChannelLayout();
+         metadata = reader->metadataValues;
+     }
+@@ -942,13 +944,19 @@ void AudioFileManager::unregisterMemoryBuffer (const std::string& filename)
+ 
+ std::unique_ptr<AudioFormatReaderWithTimeout> AudioFileManager::createMemoryReader (const AudioFile& file) const
+ {
+-    const juce::ScopedLock sl (knownFilesLock);
++    {
++        const juce::ScopedLock sl (knownFilesLock);
+ 
+-    auto it = knownFiles.find (file.getHash());
++        auto it = knownFiles.find (file.getHash());
++
++        if (it != knownFiles.end() && it->second->memoryBuffer.has_value())
++            return std::make_unique<MemoryBufferReader> (*(it->second->memoryBuffer),
++                                                         it->second->info.sampleRate);
++    }
+ 
+-    if (it != knownFiles.end() && it->second->memoryBuffer.has_value())
+-        return std::make_unique<MemoryBufferReader> (*(it->second->memoryBuffer),
+-                                                     it->second->info.sampleRate);
++    // Mixtopia patch: files read directly by a reader the app supplies.
++    if (createDirectReader)
++        return createDirectReader (file.getFile());
+ 
+     return {};
+ }
+diff --git a/modules/tracktion_engine/audio_files/tracktion_AudioFileManager.h b/modules/tracktion_engine/audio_files/tracktion_AudioFileManager.h
+index 37e79325..2491f59e 100644
+--- a/modules/tracktion_engine/audio_files/tracktion_AudioFileManager.h
++++ b/modules/tracktion_engine/audio_files/tracktion_AudioFileManager.h
+@@ -46,6 +46,17 @@ public:
+     /// AudioFormatReaderWithTimeout for it. Returns nullptr otherwise.
+     std::unique_ptr<AudioFormatReaderWithTimeout> createMemoryReader (const AudioFile&) const;
+ 
++    /// Mixtopia patch (tracktion-direct-reader.patch): an optional hook that supplies a reader for a
++    /// file to be read directly, like a memory buffer, instead of through the background-buffered
++    /// path Tracktion uses for files it can't memory-map (which can return silence for a moment
++    /// after playback starts or jumps). Return nullptr for files it doesn't handle.
++    std::function<std::unique_ptr<AudioFormatReaderWithTimeout> (const juce::File&)> createDirectReader;
++
++    /// Mixtopia patch: true for the files createDirectReader handles. They're treated like WAVs (no
++    /// cached proxy, no BufferedFileReader path in WaveNodeRealTime), so every read goes through
++    /// the direct reader.
++    std::function<bool (const juce::File&)> isReadDirectly;
++
+     juce::AudioThumbnailCache& getAudioThumbnailCache()     { return *thumbnailCache; }
+ 
+     Engine& engine;

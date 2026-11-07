@@ -1,0 +1,264 @@
+# Mixtopia patch (2026-10-28, chopping): a playing clip whose start, end or offset changes while its
+# content stays where it was (a piece split off or joined up while playing) keeps its running file reader,
+# resampler and time-stretcher; only the edit-to-clip layer is built anew. Without it the clip started them
+# afresh mid-song: a 10-20 ms dropout / crackle at every such change (live recordings, Rubber Band).
+# Applied by scripts/fetch-deps.sh after tracktion-timestretch.patch and tracktion-direct-reader.patch.
+--- a/modules/tracktion_engine/playback/graph/tracktion_WaveNode.h	2026-10-28 13:21:02.191650292 -0500
++++ b/modules/tracktion_engine/playback/graph/tracktion_WaveNode.h	2026-10-28 13:21:02.193650336 -0500
+@@ -16,6 +16,7 @@
+ 
+ class TimeRangeRemappingReader;
+ class EditToClipBeatReader;
++class TimeRangeReader;
+ class EditToClipTimeReader;
+ class ResamplerReader;
+ class PitchAdjustReader;
+@@ -241,8 +242,10 @@
+     const ReadAhead readAhead;
+ 
+     size_t stateHash = 0;
++    size_t contentHash = 0;   // (Mixtopia patch) stateHash without the clip's start, end and offset
+     ResamplerReader* resamplerReader = nullptr;
+     PitchAdjustReader* pitchAdjustReader = nullptr;
++    std::shared_ptr<TimeRangeReader> timeRangeReader;   // (Mixtopia patch) taken over when only the clip's place changed
+     std::shared_ptr<SpeedFadeEditReader> editReader;
+     std::shared_ptr<std::vector<float>> channelState;
+     std::shared_ptr<BeatDuration> dynamicOffsetBeats = std::make_shared<BeatDuration>();
+@@ -255,6 +258,7 @@
+     std::shared_ptr<tempo::Sequence::Position> chordPitchPosition;
+ 
+     bool buildAudioReaderGraph();
++    void buildEditReader (std::shared_ptr<TimeRangeReader>);
+     void replaceStateIfPossible (NodeGraph*);
+     void replaceStateIfPossible (WaveNodeRealTime&);
+     void processSection (ProcessContext&);
+--- a/modules/tracktion_engine/playback/graph/tracktion_WaveNode.cpp	2026-10-28 13:21:02.190650271 -0500
++++ b/modules/tracktion_engine/playback/graph/tracktion_WaveNode.cpp	2026-10-28 13:21:02.193650336 -0500
+@@ -1192,7 +1192,7 @@
+ class EditToClipTimeReader final    : public AudioReader
+ {
+ public:
+-    EditToClipTimeReader (std::unique_ptr<TimeRangeReader> input,
++    EditToClipTimeReader (std::shared_ptr<TimeRangeReader> input,
+                           TimeRange sourceTimeRange, TimeDuration offsetTime,
+                           double speedRatioToUse)
+         : source (std::move (input)),
+@@ -1253,7 +1253,7 @@
+         return source->readSamples (destBuffer);
+     }
+ 
+-    std::unique_ptr<TimeRangeReader> source;
++    std::shared_ptr<TimeRangeReader> source;   // (Mixtopia patch: shared - see replaceStateIfPossible)
+     const TimeRange clipPosition;
+     const TimeDuration offset;
+     const double speedRatio;
+@@ -1267,7 +1267,7 @@
+ class BeatRangeReader final : public AudioReader
+ {
+ public:
+-    BeatRangeReader (std::unique_ptr<TimeRangeReader> input,
++    BeatRangeReader (std::shared_ptr<TimeRangeReader> input,
+                      BeatRange loopRange_,
+                      BeatDuration offset_,
+                      std::shared_ptr<BeatDuration> dynamicOffset_,
+@@ -1305,7 +1305,7 @@
+     }
+ 
+ private:
+-    std::unique_ptr<TimeRangeReader> source;
++    std::shared_ptr<TimeRangeReader> source;   // (Mixtopia patch: shared - see replaceStateIfPossible)
+     const BeatRange loopRange;
+     const BeatDuration offset;
+     std::shared_ptr<BeatDuration> dynamicOffset;
+@@ -1996,6 +1996,22 @@
+     hash_combine (stateHash, static_cast<int> (timeStretcherMode));
+     hash_combine (stateHash, elastiqueProOptions.toString().hashCode());
+     hash_combine (stateHash, pitchChangeSemitones);
++
++    // (Mixtopia patch) The same without where the clip starts and ends and its offset - only where its
++    // content starts: a clip trimmed, split or joined while playing keeps its running readers.
++    hash_combine (contentHash, removeRoundingError (editPositionTime.getStart() - offsetTime));
++    hash_combine (contentHash, removeRoundingError (loopSectionTime.getStart()));
++    hash_combine (contentHash, removeRoundingError (loopSectionTime.getEnd()));
++    hash_combine (contentHash, speedRatio);
++    hash_combine (contentHash, editItemID.getRawID());
++    hash_combine (contentHash, channelsToUse.getNumChannels());
++    hash_combine (contentHash, destChannels.getNumChannels());
++    hash_combine (contentHash, audioFile.getHash());
++    hash_combine (contentHash, resamplingQualityToUse);
++    hash_combine (contentHash, speedFadeDescription);
++    hash_combine (contentHash, static_cast<int> (timeStretcherMode));
++    hash_combine (contentHash, elastiqueProOptions.toString().hashCode());
++    hash_combine (contentHash, pitchChangeSemitones);
+ }
+ 
+ WaveNodeRealTime::WaveNodeRealTime (BeatConfig c)
+@@ -2060,6 +2076,33 @@
+         hash_combine (stateHash, chordPitchSequence->hash());
+ 
+     hash_combine (stateHash, pitchChangeSemitones);
++
++    // (Mixtopia patch) The same without where the clip starts and ends and its offset - only where its
++    // content starts: a clip trimmed, split or joined while playing keeps its running readers.
++    hash_combine (contentHash, removeRoundingError (editPositionBeats.getStart() - offsetBeats));
++    hash_combine (contentHash, removeRoundingError (loopSectionBeats.getStart()));
++    hash_combine (contentHash, removeRoundingError (loopSectionBeats.getEnd()));
++    hash_combine (contentHash, editItemID.getRawID());
++    hash_combine (contentHash, channelsToUse.getNumChannels());
++    hash_combine (contentHash, destChannels.getNumChannels());
++    hash_combine (contentHash, audioFile.getHash());
++    hash_combine (contentHash, resamplingQuality);
++    hash_combine (contentHash, speedFadeDescription);
++
++    if (warpMap)
++        hash_combine (contentHash, *warpMap);
++
++    hash_combine (contentHash, static_cast<int> (timeStretcherMode));
++    hash_combine (contentHash, elastiqueProOptions.toString().hashCode());
++
++    hash_combine (contentHash, fileTempoSequence->hash());
++    hash_combine (contentHash, syncTempo);
++    hash_combine (contentHash, syncPitch);
++
++    if (chordPitchSequence)
++        hash_combine (contentHash, chordPitchSequence->hash());
++
++    hash_combine (contentHash, pitchChangeSemitones);
+ }
+ 
+ WaveNodeRealTime::WaveNodeRealTime (const AudioFile& af,
+@@ -2147,6 +2190,33 @@
+         hash_combine (stateHash, chordPitchSequence->hash());
+ 
+     hash_combine (stateHash, pitchChangeSemitones);
++
++    // (Mixtopia patch) The same without where the clip starts and ends and its offset - only where its
++    // content starts: a clip trimmed, split or joined while playing keeps its running readers.
++    hash_combine (contentHash, removeRoundingError (editPositionBeats.getStart() - offsetBeats));
++    hash_combine (contentHash, removeRoundingError (loopSectionBeats.getStart()));
++    hash_combine (contentHash, removeRoundingError (loopSectionBeats.getEnd()));
++    hash_combine (contentHash, editItemID.getRawID());
++    hash_combine (contentHash, channelsToUse.getNumChannels());
++    hash_combine (contentHash, destChannels.getNumChannels());
++    hash_combine (contentHash, audioFile.getHash());
++    hash_combine (contentHash, resamplingQualityToUse);
++    hash_combine (contentHash, speedFadeDescription);
++
++    if (warpMap)
++        hash_combine (contentHash, *warpMap);
++
++    hash_combine (contentHash, static_cast<int> (timeStretcherMode));
++    hash_combine (contentHash, elastiqueProOptions.toString().hashCode());
++
++    hash_combine (contentHash, fileTempoSequence->hash());
++    hash_combine (contentHash, syncTempo);
++    hash_combine (contentHash, syncPitch);
++
++    if (chordPitchSequence)
++        hash_combine (contentHash, chordPitchSequence->hash());
++
++    hash_combine (contentHash, pitchChangeSemitones);
+ }
+ 
+ //==============================================================================
+@@ -2208,6 +2278,14 @@
+     if (editReader)
+         return true;
+ 
++    // (Mixtopia patch) Readers taken over from the node this replaces: only the top layers anew.
++    if (timeRangeReader != nullptr)
++    {
++        buildEditReader (timeRangeReader);
++        isFirstBlock = false;   // (continuous: no fade in)
++        return true;
++    }
++
+     AudioFileCache::Reader::Ptr fileCacheReader;
+ 
+     // Try creating a MemoryMappedFileReader first for compressed formats
+@@ -2268,7 +2346,6 @@
+ 
+     auto timeStretcher = timeStretchReader.get();
+     std::unique_ptr<TimeRangeReader> timeRangeReader;
+-    std::unique_ptr<EditReader> basicEditReader;
+ 
+     if (syncPitch == SyncPitch::yes)
+     {
+@@ -2298,21 +2375,8 @@
+         }
+     }
+ 
+-    if (syncTempo == SyncTempo::yes || syncPitch == SyncPitch::yes)
+-    {
+-        assert (fileTempoSequence);
+-        auto beatRangeReader    = std::make_unique<BeatRangeReader> (std::move (timeRangeReader),
+-                                                                     loopSectionBeats, offsetBeats, dynamicOffsetBeats, *fileTempoPosition);
+-        auto editToClipBeatReader    = std::make_unique<EditToClipBeatReader> (std::move (beatRangeReader), editPositionBeats, dynamicOffsetBeats);
+-        basicEditReader = std::make_unique<EditReader> (std::move (editToClipBeatReader), nullptr);
+-    }
+-    else
+-    {
+-        auto editToClipTimeReader = std::make_unique<EditToClipTimeReader> (std::move (timeRangeReader), editPositionTime, offsetTime, speedRatio);
+-        basicEditReader = std::make_unique<EditReader> (nullptr, std::move (editToClipTimeReader));
+-    }
+-
+-    editReader = std::make_shared<SpeedFadeEditReader> (std::move (basicEditReader), speedFadeDescription, editTempoSequence);
++    this->timeRangeReader = std::shared_ptr<TimeRangeReader> (std::move (timeRangeReader));
++    buildEditReader (this->timeRangeReader);
+ 
+     if (! channelState)
+     {
+@@ -2330,6 +2394,27 @@
+     return true;
+ }
+ 
++void WaveNodeRealTime::buildEditReader (std::shared_ptr<TimeRangeReader> timeRangeReader)
++{
++    std::unique_ptr<EditReader> basicEditReader;
++
++    if (syncTempo == SyncTempo::yes || syncPitch == SyncPitch::yes)
++    {
++        assert (fileTempoSequence);
++        auto beatRangeReader    = std::make_unique<BeatRangeReader> (std::move (timeRangeReader),
++                                                                     loopSectionBeats, offsetBeats, dynamicOffsetBeats, *fileTempoPosition);
++        auto editToClipBeatReader    = std::make_unique<EditToClipBeatReader> (std::move (beatRangeReader), editPositionBeats, dynamicOffsetBeats);
++        basicEditReader = std::make_unique<EditReader> (std::move (editToClipBeatReader), nullptr);
++    }
++    else
++    {
++        auto editToClipTimeReader = std::make_unique<EditToClipTimeReader> (std::move (timeRangeReader), editPositionTime, offsetTime, speedRatio);
++        basicEditReader = std::make_unique<EditReader> (nullptr, std::move (editToClipTimeReader));
++    }
++
++    editReader = std::make_shared<SpeedFadeEditReader> (std::move (basicEditReader), speedFadeDescription, editTempoSequence);
++}
++
+ void WaveNodeRealTime::replaceStateIfPossible (NodeGraph* nodeGraphToReplace)
+ {
+     if (nodeGraphToReplace == nullptr)
+@@ -2352,9 +2437,25 @@
+     // This will be used to fade out the last block if the state hash is different
+     channelState = other.channelState;
+ 
++    // (Mixtopia patch, 2026-10-28) Only the clip's start, end or offset changed, not where its content
++    // plays (a piece of a song split off or joined up while playing): keep the running readers below
++    // the clip's edit-to-clip layer (file reader, resampler, time-stretcher) and build only that layer
++    // anew. Starting them afresh mid-song crackled.
++    if (other.stateHash != stateHash && other.contentHash == contentHash && other.timeRangeReader != nullptr)
++    {
++        fileTempoSequence = other.fileTempoSequence;
++        fileTempoPosition = other.fileTempoPosition;
++        resamplerReader = other.resamplerReader;
++        pitchAdjustReader = other.pitchAdjustReader;
++        timeRangeReader = other.timeRangeReader;
++        return;
++    }
++
+     if (other.stateHash != stateHash)
+         return;
+ 
++    timeRangeReader = other.timeRangeReader;
++
+     fileTempoSequence = other.fileTempoSequence;
+     fileTempoPosition = other.fileTempoPosition;
+     resamplerReader = other.resamplerReader;

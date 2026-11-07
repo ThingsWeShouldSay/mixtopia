@@ -1,0 +1,233 @@
+diff --git a/modules/tracktion_engine/playback/graph/tracktion_WaveNode.cpp b/modules/tracktion_engine/playback/graph/tracktion_WaveNode.cpp
+index 1993f027..800a44c9 100644
+--- a/modules/tracktion_engine/playback/graph/tracktion_WaveNode.cpp
++++ b/modules/tracktion_engine/playback/graph/tracktion_WaveNode.cpp
+@@ -735,18 +735,24 @@ public:
+     // to handle the stretcher's startup latency locally
+     void primeStretcher()
+     {
++        // Mixtopia patch: query the latency now (it can depend on the speed just set), and
++        // back up enough source frames to cover it at this speed.
++        latencySamples = timeStretcher.getLatencySamples();
++
+         if (latencySamples <= 0)
+             return;
+ 
+         // Back up the source to provide real audio context for the warmup
+         const auto position = static_cast<SampleCount> (readPosition);
+-        const auto backupPos = std::max (SampleCount (0), position - latencySamples);
++        const auto backupPos = std::max (SampleCount (0), position - static_cast<SampleCount> (std::ceil (latencySamples * playbackSpeedRatio)));
+         source->setPosition (backupPos);
+ 
+         // The stretcher's output lags its input by latencySamples so to line the next
+         // output frame up with readPosition, the frames between backupPos and
+         // readPosition have to be discarded as well as the latency region itself
+-        const auto numToDiscard = static_cast<int> (position - backupPos) + latencySamples;
++        // (Mixtopia patch: the backed-up source frames come out stretched, so convert them to
++        // output frames.)
++        const auto numToDiscard = juce::roundToInt (static_cast<double> (position - backupPos) / playbackSpeedRatio) + latencySamples;
+         int outputDiscarded = 0;
+ 
+         while (outputDiscarded < numToDiscard)
+@@ -912,17 +918,24 @@ public:
+     // to handle the stretcher's startup latency locally
+     void primeStretcher()
+     {
++        // Mixtopia patch: query the latency now (it can depend on the speed just set), and
++        // back up enough source frames to cover it at this speed.
++        latencySamples = timeStretcher.getLatencySamples();
++
+         if (latencySamples <= 0)
+             return;
+ 
++        // Back up the source to provide real audio context for the warmup
+         const auto position = static_cast<SampleCount> (readPosition);
+-        const auto backupPos = std::max (SampleCount (0), position - latencySamples);
++        const auto backupPos = std::max (SampleCount (0), position - static_cast<SampleCount> (std::ceil (latencySamples * playbackSpeedRatio)));
+         source->setPosition (backupPos);
+ 
+         // The stretcher's output lags its input by latencySamples so to line the next
+         // output frame up with readPosition, the frames between backupPos and
+         // readPosition have to be discarded as well as the latency region itself
+-        const auto numToDiscard = static_cast<int> (position - backupPos) + latencySamples;
++        // (Mixtopia patch: the backed-up source frames come out stretched, so convert them to
++        // output frames.)
++        const auto numToDiscard = juce::roundToInt (static_cast<double> (position - backupPos) / playbackSpeedRatio) + latencySamples;
+         int outputDiscarded = 0;
+ 
+         while (outputDiscarded < numToDiscard)
+diff --git a/modules/tracktion_engine/timestretch/tracktion_TimeStretch.cpp b/modules/tracktion_engine/timestretch/tracktion_TimeStretch.cpp
+index 26fd3d15..96e6bc4b 100644
+--- a/modules/tracktion_engine/timestretch/tracktion_TimeStretch.cpp
++++ b/modules/tracktion_engine/timestretch/tracktion_TimeStretch.cpp
+@@ -723,9 +723,13 @@ struct RubberBandStretcher  : public TimeStretcher::Stretcher
+                 | RubberBand::RubberBandStretcher::OptionPitchHighConsistency
+                 | RubberBand::RubberBandStretcher::PercussiveOptions;
+ 
++        // Mixtopia patch: use Rubber Band's R3 ("finer") engine for melodic material, processing
++        // the stereo channels together. Channels apart smeared the stereo image and dulled the
++        // highs on full mixes (measured, and the user heard weak kicks).
+         return RubberBand::RubberBandStretcher::OptionProcessRealTime
+             | RubberBand::RubberBandStretcher::OptionPitchHighConsistency
+-            | RubberBand::RubberBandStretcher::OptionWindowShort;
++            | RubberBand::RubberBandStretcher::OptionEngineFiner
++            | RubberBand::RubberBandStretcher::OptionChannelsTogether;
+     }
+ 
+     RubberBandStretcher (double sourceSampleRate, int samplesPerBlock, int numChannels, bool percussive)
+@@ -749,14 +753,36 @@ struct RubberBandStretcher  : public TimeStretcher::Stretcher
+         // and a new stream will need its final block marking again when flushed
+         numSamplesToDrop = -1;
+         hasDoneFinalBlock = false;
++        pendingInputFrames = 0.0;
++        extraInputPerOutput = 0.0;
++        hasSpeed = false;
++    }
++
++    // Mixtopia patch (tempo ramps): the input must run ahead of the output by an amount that
++    // grows with the speed (input frames per output frame) times the output delay. When the speed
++    // changes while playing, the song otherwise stays behind (or ahead) by that delay times the
++    // change: measured +2.2 ms after a 128 -> 135 BPM ramp. Rubber Band takes the input it asks
++    // for, so the difference is consumed by running a little faster or slower (at most 2%) until
++    // it's made up. (After a reset the stream starts again at the new speed.)
++    void applyTimeRatio()
++    {
++        const auto inputPerOutput = 1.0 / nominalTimeRatio;
++        const auto limit = 0.02 * inputPerOutput;
++        extraInputPerOutput = juce::jlimit (-limit, limit, pendingInputFrames / samplesPerOutputBuffer);
++        rubberBandStretcher.setTimeRatio (1.0 / (inputPerOutput + extraInputPerOutput));
+     }
+ 
+     bool setSpeedAndPitch (float speedRatio, float semitonesUp) override
+     {
+         const float pitch = juce::jlimit (0.25f, 4.0f, tracktion::engine::Pitch::semitonesToRatio (semitonesUp));
+ 
++        if (hasSpeed && speedRatio != nominalTimeRatio)
++            pendingInputFrames += (double) rubberBandStretcher.getStartDelay() * (1.0 / speedRatio - 1.0 / nominalTimeRatio);
++
++        hasSpeed = true;
++        nominalTimeRatio = speedRatio;
+         rubberBandStretcher.setPitchScale (pitch);
+-        rubberBandStretcher.setTimeRatio (speedRatio);
++        applyTimeRatio();
+ 
+         if (numSamplesToDrop == -1)
+         {
+@@ -780,8 +806,7 @@ struct RubberBandStretcher  : public TimeStretcher::Stretcher
+             jassert (numSamplesToPad == 0);
+         }
+ 
+-        const bool r = rubberBandStretcher.getPitchScale() == pitch
+-                    && rubberBandStretcher.getTimeRatio() == speedRatio;
++        const bool r = rubberBandStretcher.getPitchScale() == pitch;
+         jassert (r);
+         juce::ignoreUnused (r);
+ 
+@@ -824,7 +849,21 @@ struct RubberBandStretcher  : public TimeStretcher::Stretcher
+         }
+ 
+         if (numAvailable > 0)
+-            return (int) rubberBandStretcher.retrieve (outChannels, (size_t) std::min (numAvailable, samplesPerOutputBuffer));
++        {
++            const auto numRetrieved = (int) rubberBandStretcher.retrieve (outChannels, (size_t) std::min (numAvailable, samplesPerOutputBuffer));
++
++            if (extraInputPerOutput != 0.0)
++            {
++                pendingInputFrames -= numRetrieved * extraInputPerOutput;
++
++                if (std::abs (pendingInputFrames) < 0.01)
++                    pendingInputFrames = 0.0;
++
++                applyTimeRatio();
++            }
++
++            return numRetrieved;
++        }
+ 
+         return 0;
+     }
+@@ -855,6 +894,10 @@ private:
+     const int samplesPerOutputBuffer = 0;
+     int numSamplesToDrop = -1;
+     bool hasDoneFinalBlock = false;
++    double nominalTimeRatio = 1.0;          // output frames per input frame, as asked for
++    double pendingInputFrames = 0.0;        // lead change still to consume (see applyTimeRatio)
++    double extraInputPerOutput = 0.0;
++    bool hasSpeed = false;
+ 
+     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (RubberBandStretcher)
+ };
+@@ -925,18 +968,41 @@ struct SignalsmithStretcher  : public TimeStretcher::Stretcher
+     {
+         stretch.reset();
+         hasDoneFinalBlock = false;
++        fractionalInputFrames = 0.0;
++        pendingInputFrames = 0.0;
++        hasSpeed = false;
+     }
+ 
+     bool setSpeedAndPitch (float speedRatio_, float semitonesUp) override
+     {
++        // Mixtopia patch (tempo ramps): the input must run ahead of the output by
++        // inputLatency + outputLatency * (input frames per output frame). When the speed changes
++        // while playing, that lead has to change too, or the song stays behind (or ahead) by
++        // outputLatency * the change: measured +4.9 ms after a 128 -> 135 BPM ramp. So feed the
++        // difference over the next blocks. (After a reset the reader primes at the new speed.)
++        if (hasSpeed && speedRatio_ != speedRatio)
++            pendingInputFrames += stretch.outputLatency() * (1.0 / speedRatio_ - 1.0 / speedRatio);
++
++        hasSpeed = true;
+         speedRatio = speedRatio_;
+         stretch.setTransposeSemitones (semitonesUp);
+         return true;
+     }
+ 
++    // The part of the pending lead change fed in the next block: at most 2% extra or less input,
++    // so a sudden tempo jump is spread over a few blocks instead of a burst.
++    double pendingThisBlock() const
++    {
++        const auto limit = 0.02 * samplesPerOutputBuffer / speedRatio;
++        return juce::jlimit (-limit, limit, pendingInputFrames);
++    }
++
+     int getFramesNeeded() const override
+     {
+-        return juce::roundToInt (samplesPerOutputBuffer / speedRatio);
++        // Mixtopia patch: carry the fractional part between blocks. Rounding each block's input
++        // count made the stretched audio run slightly fast or slow (e.g. 273 instead of 273.07
++        // frames per 256 at 120->128 BPM), drifting ~100 ms over a 7-minute song.
++        return std::max (0, (int) std::floor (samplesPerOutputBuffer / speedRatio + pendingThisBlock() + fractionalInputFrames));
+     }
+ 
+     int getMaxFramesNeeded() const override
+@@ -948,6 +1014,9 @@ struct SignalsmithStretcher  : public TimeStretcher::Stretcher
+     {
+         CRASH_TRACER
+         stretch.process (inChannels, numSamples, outChannels, samplesPerOutputBuffer);
++        const auto pending = pendingThisBlock();
++        pendingInputFrames -= pending;
++        fractionalInputFrames += samplesPerOutputBuffer / speedRatio + pending - numSamples;
+         return samplesPerOutputBuffer;
+     }
+ 
+@@ -963,7 +1032,9 @@ struct SignalsmithStretcher  : public TimeStretcher::Stretcher
+ 
+     int getLatencySamples() const override
+     {
+-        return stretch.inputLatency() + stretch.outputLatency();
++        // Mixtopia patch: inputLatency is in input frames; at this speed each becomes speedRatio
++        // output frames. (Was inputLatency + outputLatency, wrong whenever stretching.)
++        return stretch.outputLatency() + juce::roundToInt (stretch.inputLatency() * speedRatio);
+     }
+ 
+ private:
+@@ -971,6 +1042,9 @@ private:
+     int numChannels = 0;
+     const int samplesPerOutputBuffer;
+     float speedRatio = 1.0f;
++    double fractionalInputFrames = 0.0;
++    double pendingInputFrames = 0.0;   // lead change still to feed (tempo ramps, see setSpeedAndPitch)
++    bool hasSpeed = false;
+     bool hasDoneFinalBlock = false;
+ 
+     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SignalsmithStretcher)

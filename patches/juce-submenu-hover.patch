@@ -1,0 +1,16 @@
+diff --git a/modules/juce_gui_basics/menus/juce_PopupMenu.cpp b/modules/juce_gui_basics/menus/juce_PopupMenu.cpp
+index 5f98d4e97e..0aa3dcb168 100644
+--- a/modules/juce_gui_basics/menus/juce_PopupMenu.cpp
++++ b/modules/juce_gui_basics/menus/juce_PopupMenu.cpp
+@@ -1634,6 +1634,11 @@ private:
+         auto itemScreenBounds = window.activeSubMenu->getScreenBounds();
+         auto subX = (float) itemScreenBounds.getX();
+ 
++        // Mixtopia: only a mouse that actually moves sideways towards the submenu counts. With the triangle alone, a
++        // mouse moving straight down near the menu's edge kept a tall submenu open (File > Open Recent "hung").
++        if (const auto dx = newGlobalPos.x - lastMousePos.x; itemScreenBounds.getX() > window.getX() ? dx <= 0 : dx >= 0)
++            return false;
++
+         auto oldGlobalPos = lastMousePos;
+ 
+         if (itemScreenBounds.getX() > window.getX())

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Mixtopia
+Comment=Build timeline-based DJ mixes and mashups
+Exec=Mixtopia
+Icon=mixtopia
+Categories=AudioVideo;Audio;
+Terminal=false

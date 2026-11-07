@@ -1,0 +1,28 @@
+# Build output
+/build/
+/build-*/
+/dist/
+*.AppImage
+/AppDir/
+
+# Downloaded dependencies (JUCE, Tracktion Engine) are fetched by the build
+/external/
+
+# Editor / OS clutter
+.cache/
+compile_commands.json
+*.swp
+.DS_Store
+
+# Test audio (keep your music out of git)
+*.mp3
+*.flac
+*.wav
+build.log
+/tools/
+package.log
+/listening-test/
+
+# Backup archives (made by hand; never in git)
+/backups/
+__pycache__/

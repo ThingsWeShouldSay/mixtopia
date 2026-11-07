@@ -1,0 +1,54 @@
+diff --git a/modules/juce_gui_basics/native/juce_DragAndDrop_linux.cpp b/modules/juce_gui_basics/native/juce_DragAndDrop_linux.cpp
+index 739caff51c..788f3bcc96 100644
+--- a/modules/juce_gui_basics/native/juce_DragAndDrop_linux.cpp
++++ b/modules/juce_gui_basics/native/juce_DragAndDrop_linux.cpp
+@@ -189,8 +189,10 @@ public:
+         {
+             dragInfo.position = dropPos;
+ 
++            // Mixtopia patch: in XdndPosition the timestamp is l[3]; l[2] holds the coordinates.
++            // Passing coordinates as the time made the X server reject the selection request.
+             if (dragInfo.isEmpty())
+-                updateDraggedFileList (clientMsg, (::Window) peer->getNativeHandle());
++                updateDraggedFileList ((::Time) clientMsg.data.l[3], (::Window) peer->getNativeHandle());
+ 
+             if (! dragInfo.isEmpty())
+                 peer->handleDragMove (dragInfo);
+@@ -203,7 +205,7 @@ public:
+         {
+             // no data, transaction finished in handleDragAndDropSelection()
+             finishAfterDropDataReceived = true;
+-            updateDraggedFileList (clientMsg, (::Window) peer->getNativeHandle());
++            updateDraggedFileList ((::Time) clientMsg.data.l[2], (::Window) peer->getNativeHandle());
+         }
+         else
+         {
+@@ -219,7 +221,9 @@ public:
+         dragAndDropCurrentMimeType = 0;
+         auto dndCurrentVersion = (static_cast<unsigned long> (clientMsg.data.l[1]) & 0xff000000) >> 24;
+ 
+-        if (dndCurrentVersion < 3 || dndCurrentVersion > XWindowSystemUtilities::Atoms::DndVersion)
++        // Mixtopia patch: accept XDND v3-5. Mutter/KWin's Xwayland bridge sends v5 regardless of
++        // our XdndAware version; the messages JUCE uses are unchanged in v4/v5.
++        if (dndCurrentVersion < 3 || dndCurrentVersion > 5)
+         {
+             dragAndDropSourceWindow = 0;
+             return;
+@@ -509,7 +513,7 @@ private:
+         sendDragAndDropMessage (msg);
+     }
+ 
+-    void updateDraggedFileList (const XClientMessageEvent& clientMsg, ::Window requestor)
++    void updateDraggedFileList (::Time time, ::Window requestor)
+     {
+         jassert (dragInfo.isEmpty());
+ 
+@@ -520,7 +524,7 @@ private:
+             XWindowSystemUtilities::ScopedXLock xLock;
+             X11Symbols::getInstance()->xConvertSelection (display, getAtoms().XdndSelection, dragAndDropCurrentMimeType,
+                                                           XWindowSystemUtilities::Atoms::getCreating (display, "JXSelectionWindowProperty"),
+-                                                          requestor, (::Time) clientMsg.data.l[2]);
++                                                          requestor, time);
+         }
+     }
+ 

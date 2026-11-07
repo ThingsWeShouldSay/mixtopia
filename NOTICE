@@ -1,0 +1,136 @@
+Mixtopia
+========
+
+Mixtopia's own source code is licensed under the GNU Affero General Public License, version 3 (AGPL-3.0) - see
+LICENSE.
+
+THE COMBINED PROGRAM IS AGPL-3.0. Mixtopia is built on the JUCE framework, which is used here under the AGPLv3, so
+the program as a whole - Mixtopia's code together with everything compiled into it - is distributed under the
+GNU Affero General Public License, version 3. The licences of the other components listed below are compatible with
+that. If you pass the program on, you must also offer its complete corresponding source code under the same licence:
+this repository at the matching commit, plus the third-party sources that scripts/fetch-deps.sh downloads at the
+exact versions it pins (with the fixes in patches/ applied).
+
+Each component keeps its own licence. In the AppImage, the licence files are in usr/share/doc/mixtopia/ (the
+shared libraries bundled by linuxdeploy bring their own copyright files in usr/share/doc/<package>/). In a build
+from source, they are in the folders scripts/fetch-deps.sh downloads into external/.
+
+
+Compiled into Mixtopia
+----------------------
+
+JUCE 8.0.13 - Copyright (c) Raw Material Software Limited.
+    Used under the GNU Affero General Public License v3 (AGPLv3). File: JUCE-LICENSE.md.
+
+Tracktion Engine 3.5.0 - Copyright (c) Tracktion Corporation.
+    GNU General Public License v3 or later. File: Tracktion-Engine-LICENSE.md.
+    Mixtopia applies three fixes of its own to it (patches/tracktion-*.patch) and two to JUCE (patches/juce-*.patch).
+
+Rubber Band Library v4.0.0 (time-stretching) - Copyright 2007-2024 Particular Programs Ltd.
+    GNU General Public License v2 or later. File: RubberBand-COPYING.txt.
+
+libKeyFinder (key detection) - Copyright 2011-2015 Ibrahim Sha'ath, and its contributors.
+    GNU General Public License v3 or later. File: libKeyFinder-LICENSE.txt.
+
+Signalsmith Stretch (time-stretching) - Copyright (c) 2022 Geraint Luff / Signalsmith Audio Ltd.
+    MIT License. Files: Signalsmith-Stretch-LICENSE.txt, Signalsmith-Linear-LICENSE.txt (Copyright (c) 2025
+    Signalsmith Audio).
+
+Bundled within Tracktion Engine and compiled in with it:
+- SoundTouch - Copyright (c) Olli Parviainen. GNU Lesser General Public License v2.1 or later.
+  File: SoundTouch-LGPL-2.1.txt.
+- airwindows effect code - Copyright (c) airwindows (Chris Johnson). The airwindows project is released under the
+  MIT License; the files in Tracktion's copy carry only their copyright line.
+- CHOC - Copyright (c) 2025 Tracktion Corporation. ISC License. File: choc-LICENSE.md.
+- crill - Copyright (c) 2022 Timur Doumler and Fabian Renn-Giles. Boost Software License 1.0. File: crill-LICENSE.txt.
+- farbot - Copyright (c) 2019 Fabian Renn. MIT License. File: farbot-LICENSE.txt.
+- libsamplerate (sample-rate conversion code) - Copyright (c) 2002-2021 Erik de Castro Lopo. BSD 2-Clause License
+  (text below).
+- magic_enum - Copyright (c) 2019-2023 Daniil Goncharov. MIT License (text below).
+- moodycamel::ConcurrentQueue - Copyright (c) 2013-2020 Cameron Desrochers. Simplified BSD License (text below);
+  includes an adaptation of Jeff Preshing's semaphore implementation (zlib License).
+- rpmalloc - Mattias Jansson. Released into the public domain.
+- tl::expected - written in 2017 by Sy Brand. Released into the public domain under CC0 1.0.
+
+The Inter typeface 4.1 (compiled in as the app's font) - Copyright (c) 2016 The Inter Project Authors.
+    SIL Open Font License 1.1. File: Inter-font-LICENSE.txt.
+
+
+Shared libraries bundled in the AppImage (each with its copyright file in usr/share/doc/<package>/)
+------------------------------------------------------------------------------------------------
+
+- libmpg123 (MP3 decoding) - GNU Lesser General Public License v2.1.
+- libmp3lame / LAME (MP3 encoding, loaded at run time) - GNU Lesser General Public License v2 or later.
+- libfftw3 / FFTW (used by libKeyFinder) - GNU General Public License v2 or later.
+- libpng16 - libpng License.
+- libbz2 (bzip2) - bzip2 License (BSD-style).
+- libbrotlicommon / libbrotlidec (Brotli) - MIT License.
+- libatomic (from GCC) - GNU General Public License v3 with the GCC Runtime Library Exception.
+
+
+Licence texts that have no file of their own
+--------------------------------------------
+
+libsamplerate - BSD 2-Clause License (Tracktion's copy says "released under 2-clause BSD license" and refers to
+libsamplerate's COPYING file, which it doesn't include; the standard BSD 2-Clause wording follows)
+
+    Copyright (c) 2002-2021, Erik de Castro Lopo <erikd@mega-nerd.com>
+    All rights reserved.
+
+    Redistribution and use in source and binary forms, with or without modification, are permitted provided that
+    the following conditions are met:
+    1. Redistributions of source code must retain the above copyright notice, this list of conditions and the
+       following disclaimer.
+    2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the
+       following disclaimer in the documentation and/or other materials provided with the distribution.
+
+    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED
+    WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+    PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY
+    DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+    PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+    CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+    OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
+    DAMAGE.
+
+moodycamel::ConcurrentQueue - Simplified BSD License
+
+    Copyright (c) 2013-2020, Cameron Desrochers.
+    All rights reserved.
+
+    Redistribution and use in source and binary forms, with or without modification, are permitted provided that
+    the following conditions are met:
+    - Redistributions of source code must retain the above copyright notice, this list of conditions and the
+      following disclaimer.
+    - Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the
+      following disclaimer in the documentation and/or other materials provided with the distribution.
+
+    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED
+    WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+    PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY
+    DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+    PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+    CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+    OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
+    DAMAGE.
+
+magic_enum - MIT License
+
+    Copyright (c) 2019 - 2023 Daniil Goncharov
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+    documentation files (the "Software"), to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and
+    to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all copies or substantial portions
+    of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
+    THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
+    CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+
+
+Mixtopia is not affiliated with MixMeister, Mixed In Key, or any other product or company named in its files.
