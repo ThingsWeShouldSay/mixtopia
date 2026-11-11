@@ -1526,13 +1526,23 @@ void TimelineComponent::paintClip (juce::Graphics& g, te::WaveAudioClip& clip,
         // song is analysed; until then the plain peak waveform.
         // (Mapped to the song itself: a looped song's waveform repeats with it.)
         auto loop = mixtopia::loops::getLoop (clip);
-        auto toSourceTime = [&] (int x) { return mixtopia::loops::playedToSong (loop, tempo::editToSourceSeconds (clip, xToTime (x))); };
+        auto editToSong = [&] (double editSeconds) { return mixtopia::loops::playedToSong (loop, tempo::editToSourceSeconds (clip, editSeconds)); };
+        auto toSourceTime = [&] (int x) { return editToSong (xToTime (x)); };
+
+        // The shape is drawn from slices one pixel wide, counted from where the song's audio begins (its content
+        // start), so they belong to the song: scrolling, moving, trimming or cutting it only changes which column shows
+        // which slice (user, 2026-11-10: waveforms "wiggled" while scrolling - each column took a slightly different
+        // part of the song whenever the view moved by part of a pixel; the same when a song was moved). The slice in
+        // the first column is worked out once, so rounding can't make neighbouring columns disagree. Zooming makes new
+        // slices, so it redraws the shape.
+        auto contentStart = tempo::getContentStart (clip).inSeconds();
+        auto firstSlice = (viewStart - contentStart) * pixelsPerSecond - headerWidth;   // (slice under column x: floor (firstSlice + x + 0.5))
         auto shapeArea = bounds.withTrimmedTop (clipTitleHeight + 2).withTrimmedBottom (beatRailHeight)
                              .getIntersection (getLocalBounds().withTrimmedLeft (headerWidth));
 
         if (auto* overview = overviews.get (mixtopia::loops::getSongFile (clip)); overview != nullptr && ! shapeArea.isEmpty())
         {
-            paintLoudnessShape (g, *overview, shapeArea, toSourceTime, colour, mixtopia::loops::getSongFile (clip));
+            paintLoudnessShape (g, *overview, shapeArea, firstSlice, contentStart, editToSong, colour, mixtopia::loops::getSongFile (clip));
         }
         else
         {
@@ -1732,8 +1742,8 @@ void TimelineComponent::paintClip (juce::Graphics& g, te::WaveAudioClip& clip,
 }
 
 void TimelineComponent::paintLoudnessShape (juce::Graphics& g, const mixtopia::LoudnessOverview& overview,
-                                            juce::Rectangle<int> shapeArea, const std::function<double (int)>& toSourceTime,
-                                            juce::Colour colour, const juce::File& songFile)
+                                            juce::Rectangle<int> shapeArea, double firstSlice, double contentStart,
+                                            const std::function<double (double)>& editToSong, juce::Colour colour, const juce::File& songFile)
 {
     // One shape growing up from the bottom: the song's loudest moments reach 82% of the height,
     // 18 dB quieter is the bottom. Zoomed out it shows the average loudness (the song's flow); at
@@ -1773,11 +1783,12 @@ void TimelineComponent::paintLoudnessShape (juce::Graphics& g, const mixtopia::L
 
     juce::Path shape, outline;
     shape.startNewSubPath ((float) columns.getX(), bottom);
-    auto start = toSourceTime (columns.getX());
 
     for (int x = columns.getX(); x < columns.getRight(); ++x)
     {
-        auto end = toSourceTime (x + 1);
+        // The slice under the column's centre (slices belong to the song - see paintClip).
+        auto slice = std::floor (firstSlice + x + 0.5);
+        auto start = editToSong (contentStart + slice * secondsPerPixel), end = editToSong (contentStart + (slice + 1.0) * secondsPerPixel);
         auto fraction = peakWeight < 1.0f ? toFraction (overview.getRelativeLevel (start, end)) : 0.0f;
 
         if (peakWeight > 0.0f)
@@ -1800,7 +1811,6 @@ void TimelineComponent::paintLoudnessShape (juce::Graphics& g, const mixtopia::L
             outline.lineTo ((float) x, y);
 
         outline.lineTo ((float) x + 1.0f, y);
-        start = end;
     }
 
     shape.lineTo ((float) columns.getRight(), bottom);

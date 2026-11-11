@@ -2380,6 +2380,184 @@ namespace mixtopia
             root.deleteRecursively();
         }
 
+        // Waveforms keep their shape while scrolling and when a song is moved or trimmed (user, 2026-11-10: they
+        // "wiggled" while scrolling - each pixel column took a slightly different slice of the song whenever the view
+        // moved by part of a pixel). Drawn for real (the timeline painted into an image) for a plain song, a song
+        // stretched to the project tempo and one under a tempo ramp, at 5 px/s (the user's video: average loudness),
+        // 50 px/s (kick blocks) and 500 px/s (peaks). After scrolling 10.5 px, every column must show what a column 10
+        // or 11 px along showed before; after moving the song a third of a pixel, what the same column or the one
+        // before showed; after trimming its start a third of a pixel, what the same column showed. (Zooming may redraw
+        // the shape: a new zoom means new slices.)
+        {
+            auto songFile = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("mixtopia-wiggle-test.wav");
+            {
+                // 60 s of kick-like bursts of random loudness on a noise bed that changes every 100 ms.
+                juce::Random random (20261110);
+                constexpr double rate = 44100.0, beat = 60.0 / 140.0;
+                juce::AudioBuffer<float> audio (2, (int) (60 * rate));
+                std::vector<float> kicks (200), bed (700);
+
+                for (auto& k : kicks)  k = 0.2f + 0.8f * random.nextFloat();
+                for (auto& b : bed)    b = 0.02f + 0.15f * random.nextFloat();
+
+                for (int i = 0; i < audio.getNumSamples(); ++i)
+                {
+                    auto t = i / rate;
+                    auto k = (size_t) (t / beat);
+                    auto phase = t - (double) k * beat;
+                    auto value = kicks[k] * (float) (std::exp (-phase * 14.0) * std::sin (juce::MathConstants<double>::twoPi * 60.0 * phase))
+                                   + bed[(size_t) (t * 10.0)] * (random.nextFloat() * 2.0f - 1.0f);
+                    audio.setSample (0, i, value);
+                    audio.setSample (1, i, value);
+                }
+
+                songFile.deleteFile();
+                std::unique_ptr<juce::OutputStream> out (songFile.createOutputStream());
+                auto writer = juce::WavAudioFormat().createWriterFor (out, juce::AudioFormatWriterOptions{}
+                                                                               .withSampleRate (rate)
+                                                                               .withNumChannels (2)
+                                                                               .withBitsPerSample (32)
+                                                                               .withSampleFormat (juce::AudioFormatWriterOptions::SampleFormat::floatingPoint));
+                if (writer != nullptr)
+                    writer->writeFromAudioSampleBuffer (audio, 0, audio.getNumSamples());
+            }
+
+            // The waveform's height in each column: pixels in the song's colour (the shape) or its outline colour.
+            auto heightsIn = [] (const juce::Image& image, juce::Colour fill)
+            {
+                std::vector<int> heights ((size_t) image.getWidth(), 0);
+                auto outline = fill.brighter (0.5f);
+                auto near = [] (juce::Colour a, juce::Colour b)
+                {
+                    return std::abs (a.getRed() - b.getRed()) + std::abs (a.getGreen() - b.getGreen()) + std::abs (a.getBlue() - b.getBlue()) < 40;
+                };
+                juce::Image::BitmapData data (image, juce::Image::BitmapData::readOnly);
+
+                for (int x = 0; x < image.getWidth(); ++x)
+                    for (int y = 0; y < image.getHeight(); ++y)
+                        if (auto c = data.getPixelColour (x, y); near (c, fill) || near (c, outline))
+                            ++heights[(size_t) x];
+
+                return heights;
+            };
+
+            // Share of columns (inside the song, in both pictures) whose height matches none of the allowed ones before
+            // (after[x] against before[x + offset]) by more than a pixel.
+            auto changedShare = [] (const std::vector<int>& before, const std::vector<int>& after, std::initializer_list<int> offsets)
+            {
+                int compared = 0, changed = 0;
+
+                for (int x = 90; x < (int) after.size() - 20; ++x)
+                {
+                    auto best = 1 << 20;
+                    auto inside = after[(size_t) x] > 0;
+
+                    for (auto o : offsets)
+                    {
+                        auto xb = x + o;
+                        inside = inside && xb > 80 && xb < (int) before.size() - 5 && before[(size_t) xb] > 0;
+
+                        if (xb > 0 && xb < (int) before.size())
+                            best = juce::jmin (best, std::abs (after[(size_t) x] - before[(size_t) xb]));
+                    }
+
+                    if (inside)
+                    {
+                        ++compared;
+                        changed += best > 1 ? 1 : 0;
+                    }
+                }
+
+                return compared > 100 ? 100.0 * changed / compared : 100.0;   // (100%: too little of the song to measure)
+            };
+
+            struct Case { const char* name; bool stretched, ramp; };
+
+            for (auto kind : { Case { "plain song", false, false }, Case { "song stretched 128 -> 140 BPM", true, false },
+                               Case { "song under a tempo ramp (140 -> 150 BPM)", true, true } })
+            {
+                for (double pps : { 5.0, 50.0, 500.0 })
+                {
+                    auto e = mixtopia::createEdit (engine);
+                    auto c = mixtopia::insertAudioFile (*te::getAudioTracks (*e)[0], songFile, te::TimePosition::fromSeconds (2.0));
+
+                    if (c == nullptr)
+                    {
+                        check (false, juce::String ("waveform stability: the test song couldn't be added (") + kind.name + ")");
+                        mixtopia::destroyEdit (e);
+                        continue;
+                    }
+
+                    if (kind.stretched)
+                        mixtopia::tempo::setBpmAndDownbeat (*c, 128.0, 0.0, mixtopia::tempo::Snap::none);
+
+                    if (kind.ramp)
+                    {
+                        auto plan = mixtopia::tempo::getTempoPlan (*e);
+                        plan = mixtopia::tempo::withTempoAt (plan, 12.0, 140.0);
+                        plan = mixtopia::tempo::withTempoAt (plan, 36.0, 150.0);
+                        mixtopia::tempo::setTempoPlan (*e, plan);
+                    }
+
+                    auto timeline = std::make_unique<TimelineComponent> (*e);   // (destroyed before the Edit)
+                    auto& tl = *timeline;
+                    tl.setBounds (0, 0, 1600, 400);
+                    auto song = mixtopia::loops::getSongFile (*c);
+
+                    for (int i = 0; i < 600 && ! tl.hasWaveform (song); ++i)
+                        juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
+
+                    auto spp = 1.0 / pps, from = 10.0;
+                    tl.setVisibleRange (from, from + 1524.0 * spp);   // (1600 px wide, 76 px of lane headers)
+                    auto colour = mixtopia::clipcolours::get (*c);
+                    auto shot = [&] { return heightsIn (tl.createComponentSnapshot (tl.getLocalBounds(), true, 1.0f), colour); };
+
+                    auto timeStarted = juce::Time::getMillisecondCounterHiRes();
+                    auto before = shot();
+                    auto msPerDraw = juce::Time::getMillisecondCounterHiRes() - timeStarted;
+                    tl.scrollTo (from + 10.5 * spp);
+                    auto scrolled = shot();
+                    auto scrollChanged = changedShare (before, scrolled, { 10, 11 });
+                    check (tl.hasWaveform (song) && scrollChanged < 1.0,
+                           juce::String ("waveform keeps its shape while scrolling: ") + kind.name + " at " + juce::String ((int) pps)
+                             + " px/s (columns changed: " + juce::String (scrollChanged, 1) + "%)");
+                    std::cout << "      (one full timeline drawing: " << juce::String (msPerDraw, 1) << " ms)" << std::endl;
+
+                    if (pps == 50.0)
+                    {
+                        // Moving the song a third of a pixel later, then trimming its start a third of a pixel (from the
+                        // view as before).
+                        tl.scrollTo (from);
+                        auto start = c->getPosition().getStart();
+                        c->setStart (start + te::TimeDuration::fromSeconds (spp / 3.0), false, true);
+                        auto moved = shot();
+                        auto moveChanged = changedShare (before, moved, { 0, -1 });
+                        c->setStart (start, false, true);
+                        c->setStart (start + te::TimeDuration::fromSeconds (spp / 3.0), true, false);
+                        auto trimmed = shot();
+                        auto trimChanged = changedShare (before, trimmed, { 0 });
+                        check (trimChanged < 1.0, juce::String ("waveform keeps its shape when the song's start is trimmed by part of a pixel: ")
+                                                      + kind.name + " (columns changed: " + juce::String (trimChanged, 1) + "%)");
+
+                        // Under a tempo ramp a moved song is really re-stretched a little (it's glued to beats, which lie
+                        // closer together further along the ramp), so its picture changes a little too: measured, not checked.
+                        if (kind.ramp)
+                            std::cout << "      (moved a third of a pixel under the ramp: " << juce::String (moveChanged, 1)
+                                      << "% of columns changed - the song is re-stretched a little there)" << std::endl;
+                        else
+                            check (moveChanged < 1.0, juce::String ("waveform keeps its shape when the song is moved by part of a pixel: ")
+                                                        + kind.name + " (columns changed: " + juce::String (moveChanged, 1) + "%)");
+                    }
+
+                    timeline = nullptr;
+                    c = nullptr;
+                    mixtopia::destroyEdit (e);
+                }
+            }
+
+            songFile.deleteFile();
+        }
+
         // The Edit's temp folder (decoded audio) is deleted with it.
         clip = nullptr;
         auto tempDir = edit->getTempDirectory (false);

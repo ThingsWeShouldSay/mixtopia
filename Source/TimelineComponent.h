@@ -86,6 +86,10 @@ public:
     // Songs, on by default): shows at a glance whether a kick sits on the song's own grid.
     void setBarLinesOnSongs (bool shouldShow)   { barLinesOnSongs = shouldShow; repaint(); }
 
+    // Whether a song's waveform (loudness overview) has been analysed and can be drawn; asking starts the analysis
+    // if it hasn't started yet (self-tests wait on this).
+    bool hasWaveform (const juce::File& songFile)   { return overviews.get (songFile) != nullptr; }
+
     // The selected clip and actions on it (each is one undo step).
     te::WaveAudioClip* getSelectedClip() const;
     void deleteSelectedClip();
@@ -280,7 +284,8 @@ private:
     void paintLanes (juce::Graphics&);
     void paintClip (juce::Graphics&, te::WaveAudioClip&, juce::Rectangle<int>, juce::Colour);
     void paintLoudnessShape (juce::Graphics&, const mixtopia::LoudnessOverview&, juce::Rectangle<int> area,
-                             const std::function<double (int)>& toSourceTime, juce::Colour, const juce::File& songFile);
+                             double firstSlice, double contentStart, const std::function<double (double)>& editToSong,
+                             juce::Colour, const juce::File& songFile);
     void paintClipBeats (juce::Graphics&, te::WaveAudioClip&, juce::Rectangle<int>);
     void paintEnvelopes (juce::Graphics&, te::WaveAudioClip&, juce::Rectangle<int>);
 
