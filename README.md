@@ -36,7 +36,7 @@ Library and Mix Overview).*
 - **Loop and chop.** Repeat any part of a song up to 64 times, seamlessly. Cut songs into pieces and rearrange or
   copy them, which is great for mashups.
 - **Camelot keys.** Each song's key is detected and shown in Camelot notation (8A, 11B, ...), and you can correct it
-  by hand.
+  by hand. **Note: Key detection, even with commercial products can be spotty. Don't take it as gospel.**
 - **Match the loudness.** Quieter songs can be raised automatically towards a loud level (never turned down), and a
   master limiter keeps the mix from clipping.
 - **Know what you'll hear.** Playback and export use the same engine, so the exported file sounds like what you
